@@ -1,0 +1,40 @@
+# ToyAgent 配置示例 1：Mistral-7B-Instruct（不支持原生 tool calling）
+#
+# 启动方式:
+#   vllm serve /path/to/Mistral-7B-Instruct-v0.2 \
+#       --served-model-name Mistral-7B-Instruct --max-model-len 20480 --port 8000
+#   python main.py --config example/config-mistral.yaml
+
+# ---- vLLM 服务连接 ----
+base_url: http://localhost:8000/v1   # 可带可不带 /v1
+model: Mistral-7B-Instruct           # 需与 --served-model-name 一致
+api_key: EMPTY                       # vLLM 默认不校验
+
+# ---- 运行时参数 ----
+temperature: 0.7
+max_tokens: 2048
+max_iters: 10        # main agent 最大循环轮数（防止死循环）
+sub_max_iters: 1     # sub agent 最大轮数（1 = 直接作答，不再调用工具）
+tool_mode: auto      # auto: 先试原生 tool_calls，服务返回 400 时自动降级为文本协议
+quiet: false         # true = 不实时打印 trace，只输出最终答案与链式摘要
+
+# ---- 任务 ----
+task: |
+  请写一个 Python 函数 is_prime(n) 判断整数 n 是否为素数，
+  然后分别判断 97 和 91，最后给出函数代码和两个数的判断结果。
+
+# ---- sub agents: 名称 -> 系统提示词（可自由增删改，名称会自动进入 call_sub_agent 的枚举）----
+sub_agents:
+  researcher: |
+    你是 researcher sub agent，负责快速给出准确的事实、定义与实现思路调研结果。
+    直接输出调研结论（要点即可），不要调用任何工具，不要寒暄。
+  writer: |
+    你是 writer sub agent，负责根据任务要求完成具体产出（如编写代码、撰写文本）。
+    直接输出完整产出，不要调用任何工具。
+  reviewer: |
+    你是 reviewer sub agent，负责审查他人给出的实现或结论：找出错误、遗漏与可改进点，
+    输出明确的审查意见。不要调用任何工具。
+
+# ---- main agent 系统提示词（可选；不写则用内置默认）----
+# main_system_prompt: |
+#   你是 main agent，负责接收用户任务、分析问题并规划执行步骤。...

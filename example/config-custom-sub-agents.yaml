@@ -1,0 +1,41 @@
+# ToyAgent 配置示例 3：自定义 sub agents（翻译 + 校对），无需改代码即可扩展
+#
+# 本例演示: sub_agents 完全由配置定义（不再使用内置的 researcher/writer/reviewer），
+# 并可覆盖 main agent 的系统提示词，使其只围绕翻译场景规划。
+#
+# 启动方式:
+#   python main.py --config example/config-custom-sub-agents.yaml
+
+# ---- vLLM 服务连接 ----
+base_url: http://localhost:8000/v1
+model: Mistral-7B-Instruct
+
+# ---- 运行时参数 ----
+temperature: 0.3            # 翻译类任务用低温度更稳定
+max_tokens: 2048
+max_iters: 10
+sub_max_iters: 1
+tool_mode: auto
+quiet: false
+
+# ---- 任务 ----
+task: |
+  将下面这段英文翻译成中文，并用校对子 agent 检查译文的准确性后给出最终译文:
+  "The quick brown fox jumps over the lazy dog. It is a pangram, used to test fonts."
+
+# ---- 自定义 sub agents（配置里写了哪些，call_sub_agent 就只会枚举哪些）----
+sub_agents:
+  translator: |
+    你是 translator sub agent，负责将英文翻译成准确、通顺的中文。
+    直接输出译文，不要调用任何工具，不要解释翻译过程。
+  proofreader: |
+    你是 proofreader sub agent，负责校对译文：检查意思是否忠实原文、有无漏译错译、
+    中文是否通顺，输出校对意见和改进后的译文。不要调用任何工具。
+
+# ---- main agent 系统提示词（覆盖内置默认，聚焦翻译场景）----
+main_system_prompt: |
+  你是 main agent，负责处理翻译任务。
+  执行规则:
+  1. 需要翻译时，调用 call_sub_agent 把原文交给 translator 子 agent。
+  2. 收到译文后，再调用 call_sub_agent 交给 proofreader 子 agent 校对。
+  3. 综合两者的输出，给出最终译文；给出最终回答时不要调用任何工具。

@@ -1,0 +1,37 @@
+# ToyAgent 配置示例 2：Qwen2.5-Instruct（支持原生 OpenAI tool calling）
+#
+# 启动方式（需开启 tool calling 相关参数）:
+#   vllm serve Qwen/Qwen2.5-7B-Instruct \
+#       --enable-auto-tool-choice --tool-call-parser hermes
+#   python main.py --config example/config-qwen-native.yaml
+
+# ---- vLLM 服务连接 ----
+base_url: http://localhost:8000/v1
+model: Qwen/Qwen2.5-7B-Instruct
+api_key: EMPTY
+
+# ---- 运行时参数 ----
+temperature: 0.7
+max_tokens: 2048
+max_iters: 10
+sub_max_iters: 1
+tool_mode: auto      # 模型支持原生 tool calling，会直接走 tool_calls 字段；
+                     # 万一服务没开对应参数返回 400，也会自动降级文本协议兜底
+quiet: false
+
+# ---- 任务 ----
+task: |
+  请写一个 Python 函数 is_prime(n) 判断整数 n 是否为素数，
+  然后分别判断 97 和 91，最后给出函数代码和两个数的判断结果。
+
+# ---- sub agents（与示例 1 相同，可自由增删改）----
+sub_agents:
+  researcher: |
+    你是 researcher sub agent，负责快速给出准确的事实、定义与实现思路调研结果。
+    直接输出调研结论（要点即可），不要调用任何工具，不要寒暄。
+  writer: |
+    你是 writer sub agent，负责根据任务要求完成具体产出（如编写代码、撰写文本）。
+    直接输出完整产出，不要调用任何工具。
+  reviewer: |
+    你是 reviewer sub agent，负责审查他人给出的实现或结论：找出错误、遗漏与可改进点，
+    输出明确的审查意见。不要调用任何工具。

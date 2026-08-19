@@ -1,0 +1,40 @@
+# ToyAgent 配置示例：Qwen3-8B（当前部署的模型）
+#
+# 启动方式（与当前服务一致）:
+#   vllm serve /path/to/Qwen3-8B \
+#       --served-model-name Qwen3-8B --max-model-len 20480 --port 8000
+#   python main.py --config example/config-qwen3.yaml
+#
+# 若想走原生 tool_calls 而非文本协议，vLLM 启动时加:
+#   --enable-auto-tool-choice --tool-call-parser qwen3
+# 不加也没关系: tool_mode: auto 会在 400 时自动降级为文本协议。
+
+# ---- vLLM 服务连接 ----
+base_url: http://localhost:8000/v1
+model: Qwen3-8B                # 需与 --served-model-name 一致
+api_key: EMPTY
+
+# ---- 运行时参数 ----
+temperature: 0.7
+max_tokens: 2048
+max_iters: 10
+sub_max_iters: 1
+tool_mode: auto
+quiet: false
+
+# ---- 任务 ----
+task: |
+  请写一个 Python 函数 is_prime(n) 判断整数 n 是否为素数，
+  然后分别判断 97 和 91，最后给出函数代码和两个数的判断结果。
+
+# ---- sub agents: 名称 -> 系统提示词（可自由增删改）----
+sub_agents:
+  researcher: |
+    你是 researcher sub agent，负责快速给出准确的事实、定义与实现思路调研结果。
+    直接输出调研结论（要点即可），不要调用任何工具，不要寒暄。
+  writer: |
+    你是 writer sub agent，负责根据任务要求完成具体产出（如编写代码、撰写文本）。
+    直接输出完整产出，不要调用任何工具。
+  reviewer: |
+    你是 reviewer sub agent，负责审查他人给出的实现或结论：找出错误、遗漏与可改进点，
+    输出明确的审查意见。不要调用任何工具。

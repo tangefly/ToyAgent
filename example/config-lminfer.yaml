@@ -1,28 +1,29 @@
-# ToyAgent 配置示例：Qwen3-8B
+# ToyAgent 配置示例：LMInfer 后端（Qwen3-0.6B，agent 模式）
 #
 # 启动方式:
-#   python -m lminfer serve /path/to/Qwen3-8B \
-#       --served-model-name Qwen3-8B --max-model-len 20480 --port 8000
-#   python main.py --config example/config-qwen3.yaml
+#   python -m lminfer serve /home/tanger/workspace/models/Qwen3-0.6B \
+#       --served-model-name Qwen3-0.6B --port 8000
+#   python main.py --config example/config-lminfer.yaml
 #
-# 若想走原生 tool_calls 而非文本协议，服务端需支持（LMInfer 对 Qwen3 默认支持）。
-# 不加也没关系: tool_mode: auto 会在 400 时自动降级为文本协议。
-# 用 vLLM 时把 agent_mode 改成 false 即可。
+# agent_mode: true 时, 每次模型请求携带 mode/trace/session_id,
+# LMInfer 把主/子 agent 的调用关联到同一个会话并累计消耗,
+# 运行结束后用 GET /v1/agent/sessions 观测。
 
 # ---- LMInfer 服务连接 ----
 base_url: http://localhost:8000/v1
-model: Qwen3-8B                # 需与 --served-model-name 一致
+model: Qwen3-0.6B              # 需与 --served-model-name 一致
 api_key: EMPTY
 
 # ---- 运行时参数 ----
 temperature: 0.3              # 低温度让工具调用更稳定（0.7 容易让模型跳过工具直接作答）
-max_tokens: 2048
-max_iters: 10
+max_tokens: 1024
+max_iters: 6
 sub_max_iters: 1
 tool_mode: auto
 force_tool_call: true        # 第一轮强制工具调用: 原生模式 tool_choice="required" / 文本模式首条必须 TOOL_CALL
 quiet: false
-agent_mode: true               # LMInfer agent 模式: 服务端按会话统计主/子 agent 的请求与 token
+agent_mode: true               # LMInfer agent 模式(默认即开, 设 false 兼容 vLLM)
+enable_thinking: false         # Qwen3 等模型 thinking 开关(可选): true 开 / false 关, 不写则用服务端默认
 
 # ---- 任务（纯推理分派示例: 模型必须先调用 call_sub_agent 让 researcher 完成推理, 无代码执行）----
 task: |

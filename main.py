@@ -1,8 +1,11 @@
-"""示例入口：1 个 main agent + 若干 sub agent，模型服务为 vLLM（OpenAI 兼容接口）。
+"""示例入口：1 个 main agent + 若干 sub agent，模型服务为 LMInfer（OpenAI 兼容接口）。
 
 用法：
-    python main.py --config example/config-mistral.yaml
-    python main.py --base-url http://localhost:8000/v1 --model Mistral-7B-Instruct
+    python main.py --config example/config-lminfer.yaml
+    python main.py --base-url http://localhost:8000/v1 --model Qwen3-0.6B
+
+默认以 LMInfer 的 agent 模式请求（mode/trace/session_id，服务端按会话统计），
+用 --no-agent-mode 关闭后可兼容 vLLM 等普通 OpenAI 服务。
 
 配置优先级: 命令行参数 > 配置文件 > 环境变量(VLLM_BASE_URL/VLLM_MODEL) > 内置默认
 """
@@ -17,9 +20,13 @@ from llm import LLMClient
 
 MAIN_SYSTEM_PROMPT = (
     "你是 main agent，负责接收用户任务、分析问题并规划执行步骤。\n"
+    "可用的 sub agent 只有三个: researcher（调研）、writer（实现/写作）、reviewer（审查）。\n"
     "执行规则:\n"
-    "1. 先分析任务目标，判断需要拆解出哪些子任务。\n"
-    "2. 需要专项能力（调研、实现、审查等）时，调用 call_sub_agent 工具把子任务分派给对应的 sub agent，等待其返回结果。\n"
+    "1. 收到任务后，第一步必须先调用 call_sub_agent 工具把任务分派给合适的 sub agent，"
+    "禁止跳过工具直接回答；在拿到工具结果之前不得输出最终回答。\n"
+    "2. call_sub_agent 的参数 name 必须精确取 researcher/writer/reviewer 之一，"
+    "task 写清楚交给该 sub agent 的具体问题。"
+    "（也可以直接用子代理名作为工具名调用，如 writer({\"task\": ...})，效果相同。）\n"
     "3. 可以按需多次、串行调用不同的 sub agent，每一步都基于已获得的结果继续推进。\n"
     "4. 所有子任务完成后，综合所有 sub agent 的输出，给出最终答案；给出最终回答时不要调用任何工具。\n"
 )
@@ -39,9 +46,13 @@ SUB_SYSTEM_PROMPTS: Dict[str, str] = {
     ),
 }
 
+# 示例任务（纯推理分派）：模型必须调用 call_sub_agent 让 researcher 完成推理，
+# 再复述其结果——不涉及代码执行，重点演示 tool call 链路本身。
 DEFAULT_TASK = (
-    "请写一个 Python 函数 is_prime(n) 判断整数 n 是否为素数，"
-    "然后分别判断 97 和 91，最后给出函数代码和两个数的判断结果。"
+    "请先调用 call_sub_agent 工具，把下面这个问题交给 researcher 子代理调研：\n"
+    "「快速排序的平均时间复杂度是多少？用一两句话说明原因。」\n"
+    "拿到 researcher 的结果后，先输出一行「researcher 调研结果：」，"
+    "再原样复述它的答案，除此之外不要输出任何其他内容。"
 )
 
 
@@ -108,6 +119,7 @@ def make_call_sub_agent(sub_agents: Dict[str, Agent]) -> Tool:
         description=(
             "把子任务分派给指定的 sub agent 执行，并返回它的结果文本。"
             "当任务需要专项能力（调研/实现/审查等）时调用它，而不是自己直接回答。"
+            "name 取 sub agent 名（researcher/writer/reviewer）。"
         ),
         parameters={
             "type": "object",
@@ -125,6 +137,7 @@ def make_call_sub_agent(sub_agents: Dict[str, Agent]) -> Tool:
             "required": ["name", "task"],
         },
         func=call_sub_agent,
+        aliases=names,  # 子代理名可直接当工具名调用（模型常见行为），自动翻译
     )
 
 
@@ -136,6 +149,7 @@ def build_main_agent(
     max_iters: int = 10,
     tool_mode: str = "auto",
     system_prompt: Optional[str] = None,
+    force_tool_call: bool = True,
 ) -> Agent:
     return Agent(
         name="main",
@@ -146,12 +160,13 @@ def build_main_agent(
         temperature=temperature,
         trace=trace,
         tool_mode=tool_mode,
+        force_tool_call=force_tool_call,
     )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="main agent + sub agent，模型服务为 vLLM（OpenAI 兼容接口）"
+        description="main agent + sub agent，模型服务为 LMInfer（OpenAI 兼容接口）"
     )
     parser.add_argument("--config", default=None, help="YAML 配置文件路径（见 example/ 目录）")
     parser.add_argument(
@@ -175,6 +190,22 @@ def main() -> None:
              "native 强制原生; text 强制文本协议（Mistral 等不支持原生 tool calling 的模型用）",
     )
     parser.add_argument(
+        "--force-tool-call", action=argparse.BooleanOptionalAction, default=None,
+        help="第一轮强制工具调用(默认开): 首轮 tool_choice=\"required\"(原生模式) / "
+             "首条回复必须输出 TOOL_CALL(文本模式), 保证 main 先分派子任务而不是直接作答; "
+             "--no-force-tool-call 关闭",
+    )
+    parser.add_argument(
+        "--agent-mode", action=argparse.BooleanOptionalAction, default=None,
+        help="LMInfer agent 模式: 请求携带 mode/trace/session_id, 服务端把主/子 agent 的"
+             "多次调用关联到同一个会话并统计消耗(默认开; --no-agent-mode 关闭以兼容 vLLM)",
+    )
+    parser.add_argument(
+        "--enable-thinking", action=argparse.BooleanOptionalAction, default=None,
+        help="Qwen3 等模型的 thinking 开关(随请求体发送): --enable-thinking 开, "
+             "--no-enable-thinking 关; 都不传则用服务端默认",
+    )
+    parser.add_argument(
         "--quiet", action="store_true",
         help="不实时打印 trace，只输出最终答案与链式摘要",
     )
@@ -190,6 +221,9 @@ def main() -> None:
     max_iters = resolve(args, cfg, "max_iters", 10)
     sub_max_iters = resolve(args, cfg, "sub_max_iters", 1)
     tool_mode = resolve(args, cfg, "tool_mode", "auto")
+    force_tool_call = resolve(args, cfg, "force_tool_call", True)
+    agent_mode = resolve(args, cfg, "agent_mode", True)
+    enable_thinking = resolve(args, cfg, "enable_thinking", None)
     quiet = args.quiet or bool(cfg.get("quiet", False))
 
     if not model:
@@ -199,20 +233,28 @@ def main() -> None:
     sub_prompts = cfg.get("sub_agents") if isinstance(cfg.get("sub_agents"), dict) else SUB_SYSTEM_PROMPTS
     main_prompt = cfg.get("main_system_prompt") or MAIN_SYSTEM_PROMPT
 
-    llm = LLMClient(base_url=base_url, api_key=api_key, model=model)
+    llm = LLMClient(
+        base_url=base_url, api_key=api_key, model=model,
+        agent_mode=agent_mode, enable_thinking=enable_thinking,
+    )
     trace = Trace(verbose=not quiet)
     sub_agents = build_sub_agents(llm, trace, temperature, sub_max_iters, prompts=sub_prompts)
     main_agent = build_main_agent(
-        llm, sub_agents, trace, temperature, max_iters, tool_mode, system_prompt=main_prompt
+        llm, sub_agents, trace, temperature, max_iters, tool_mode,
+        system_prompt=main_prompt, force_tool_call=force_tool_call,
     )
 
     src = f" (配置文件: {args.config})" if args.config else ""
-    print(f"模型: {model} @ {base_url}{src}")
+    print(f"模型: {model} @ {base_url}{src}，agent 模式: {'开' if agent_mode else '关'}，"
+          f"强制首轮工具调用: {'开' if force_tool_call else '关'}")
     answer = main_agent.run(task)
 
     print("\n========== 最终答案 ==========")
     print(answer)
     trace.dump()
+    if agent_mode and llm.session_id:
+        print(f"\nLMInfer agent 会话: {llm.session_id}"
+              "（服务端 GET /v1/agent/sessions 可查该会话的请求数与 token 消耗）")
 
 
 if __name__ == "__main__":

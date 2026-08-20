@@ -17,11 +17,14 @@ max_iters: 10        # main agent 最大循环轮数（防止死循环）
 sub_max_iters: 1     # sub agent 最大轮数（1 = 直接作答，不再调用工具）
 tool_mode: auto      # auto: 先试原生 tool_calls，服务返回 400 时自动降级为文本协议
 quiet: false         # true = 不实时打印 trace，只输出最终答案与链式摘要
+force_tool_call: true    # 第一轮强制工具调用，保证 main 先分派子任务再作答
 
 # ---- 任务 ----
 task: |
-  请写一个 Python 函数 is_prime(n) 判断整数 n 是否为素数，
-  然后分别判断 97 和 91，最后给出函数代码和两个数的判断结果。
+  请先调用 call_sub_agent 工具，把下面这个问题交给 researcher 子代理调研：
+  「快速排序的平均时间复杂度是多少？用一两句话说明原因。」
+  拿到 researcher 的结果后，先输出一行「researcher 调研结果：」，再原样复述它的答案，
+  除此之外不要输出任何其他内容。
 
 # ---- sub agents: 名称 -> 系统提示词（可自由增删改，名称会自动进入 call_sub_agent 的枚举）----
 sub_agents:

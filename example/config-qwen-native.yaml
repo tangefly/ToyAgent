@@ -17,12 +17,15 @@ max_iters: 10
 sub_max_iters: 1
 tool_mode: auto      # 模型支持原生 tool calling，会直接走 tool_calls 字段；
                      # 万一服务没开对应参数返回 400，也会自动降级文本协议兜底
+force_tool_call: true    # 第一轮强制工具调用，保证 main 先分派子任务再作答
 quiet: false
 
 # ---- 任务 ----
 task: |
-  请写一个 Python 函数 is_prime(n) 判断整数 n 是否为素数，
-  然后分别判断 97 和 91，最后给出函数代码和两个数的判断结果。
+  请先调用 call_sub_agent 工具，把下面这个问题交给 researcher 子代理调研：
+  「快速排序的平均时间复杂度是多少？用一两句话说明原因。」
+  拿到 researcher 的结果后，先输出一行「researcher 调研结果：」，再原样复述它的答案，
+  除此之外不要输出任何其他内容。
 
 # ---- sub agents（与示例 1 相同，可自由增删改）----
 sub_agents:

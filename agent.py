@@ -24,11 +24,27 @@ TOOL_CALL_MARKER = "TOOL_CALL:"
 
 
 class Trace:
-    """记录整条 agent 链上每一步日志：可实时打印，也可在结束时输出摘要。"""
+    """记录整条 agent 链上每一步日志：可实时打印，也可在结束时输出摘要。
+
+    同时维护 agent 调用链 chain：每个 agent 每次发起模型请求时把自己的名字
+    追加进链尾（连续同名不重复），整条链即 LMInfer agent 模式的 trace 字段，
+    用于在服务端把同一个 agent 任务的多次模型请求关联到同一个会话。
+    """
 
     def __init__(self, verbose: bool = True) -> None:
         self.verbose = verbose
         self.steps: List[Dict[str, str]] = []
+        self.chain: List[str] = []  # agent 调用链: main -> sub -> ...（发给 LMInfer 的 trace）
+
+    def agent_trace(self, name: str) -> List[str]:
+        """当前 agent 进入调用链（连续同名不重复），返回整条链的副本。
+
+        例如 main 调 researcher 再回到 main：["main"] -> ["main","researcher"]
+        -> ["main","researcher","main"]，最后一个元素始终是当前 agent。
+        """
+        if not self.chain or self.chain[-1] != name:
+            self.chain.append(name)
+        return list(self.chain)
 
     def log(self, agent: str, msg: str) -> None:
         self.steps.append({"agent": agent, "msg": msg})
@@ -44,7 +60,13 @@ class Trace:
 
 
 class Tool:
-    """一个可被 LLM 调用的工具：可调用对象 + OpenAI 函数 schema。"""
+    """一个可被 LLM 调用的工具：可调用对象 + OpenAI 函数 schema。
+
+    aliases: 额外的可用调用名（如 sub agent 名）。Qwen3 等模型常直接用子代理名
+    调用（writer({...}) 而非 call_sub_agent({name: "writer", ...})），
+    Agent._run_tool 会把别名自动解析到本工具，并把别名补进缺省的参数
+    （如 call_sub_agent 的 name 参数），见 _resolve_tool。
+    """
 
     def __init__(
         self,
@@ -52,11 +74,13 @@ class Tool:
         description: str,
         parameters: Dict[str, Any],
         func: Callable[..., Any],
+        aliases: Optional[List[str]] = None,
     ) -> None:
         self.name = name
         self.description = description
         self.parameters = parameters
         self.func = func
+        self.aliases = list(aliases or [])
 
     def schema(self) -> Dict[str, Any]:
         return {
@@ -90,6 +114,7 @@ class Agent:
         max_tokens: int = 2048,
         trace: Optional[Trace] = None,
         tool_mode: str = "auto",
+        force_tool_call: bool = False,
     ) -> None:
         if tool_mode not in ("auto", "native", "text"):
             raise ValueError(f"tool_mode 必须为 auto/native/text, 收到 {tool_mode!r}")
@@ -103,6 +128,7 @@ class Agent:
         self.trace = trace or Trace(verbose=False)
         self.tool_mode = tool_mode
         self.text_mode = tool_mode == "text"  # auto 模式下运行时可能切换为 True
+        self.force_tool_call = force_tool_call  # 第一轮强制要求工具调用（见 run）
 
     # ---------- 文本协议（text mode） ----------
 
@@ -134,11 +160,28 @@ class Agent:
         req = first.parameters.get("required") or list(first.parameters.get("properties", {}))[:1]
         example_args = ", ".join(f'"{p}": "..."' for p in req)
         example = f'{TOOL_CALL_MARKER} {{"tool": "{first.name}", "arguments": {{{example_args}}}}}'
+        # 别名提示：子代理名可直接当工具名调用（如 writer({...})），代码会自动翻译
+        alias_names = sorted(a for t in self.tools.values() for a in t.aliases)
+        alias_doc = (
+            f"\n提示: 也可以直接用子代理名 {', '.join(alias_names)} 作为工具名调用"
+            f"（如 {TOOL_CALL_MARKER} {{\"tool\": \"{alias_names[0]}\", \"arguments\": {{\"task\": \"...\"}}}}），"
+            "效果与调用 call_sub_agent 相同。"
+            if alias_names
+            else ""
+        )
+        # 首轮强制调用：开启 force_tool_call 时，第一条回复必须输出 TOOL_CALL
+        force_doc = (
+            "你的第一条回复必须输出 TOOL_CALL 调用工具把任务分派出去，"
+            "禁止跳过工具直接回答；拿到工具结果后再输出最终回答。\n"
+            if self.force_tool_call
+            else ""
+        )
         return (
             self.system_prompt + "\n\n"
             "【工具调用协议】\n"
             "你只能调用以下工具（名字必须完全一致，不要臆造其他工具名）:\n"
-            f"{tools_doc}\n\n"
+            f"{tools_doc}{alias_doc}\n\n"
+            f"{force_doc}"
             "需要调用工具时，在回复中输出一行（一次可输出多行）:\n"
             f"{example}\n"
             "arguments 必须包含该工具的全部必填参数。\n"
@@ -221,7 +264,15 @@ class Agent:
         step = 0
         while step < self.max_iters:
             step += 1
-            message = self._chat(messages)
+            # force_tool_call: 第一轮强制要求工具调用（tool_choice="required"），
+            # 保证 main 先分派子任务而不是直接作答——小模型（如 Qwen3-8B）默认
+            # 倾向跳过工具直接回答，这是工具调用不稳定的首要原因。
+            tool_choice = (
+                "required"
+                if self.force_tool_call and self.tools and step == 1 and not self.text_mode
+                else None
+            )
+            message = self._chat(messages, tool_choice=tool_choice)
             messages.append(message)
 
             if self.text_mode:
@@ -274,15 +325,22 @@ class Agent:
 
     # ---------- 内部辅助 ----------
 
-    def _chat(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """发一次 LLM 请求；auto 模式下遇到 400（模型不支持原生 tool calling）自动降级。"""
+    def _chat(self, messages: List[Dict[str, Any]], tool_choice: Optional[str] = None) -> Dict[str, Any]:
+        """发一次 LLM 请求；auto 模式下遇到 400（模型不支持原生 tool calling）自动降级。
+
+        tool_choice: 原生模式下透传给服务端（如 "required" 强制工具调用）；
+        文本协议模式下无此概念，忽略。
+        """
         tools = [t.schema() for t in self.tools.values()] if (self.tools and not self.text_mode) else None
+        trace = self.trace.agent_trace(self.name)  # 本 agent 进入调用链（LMInfer agent 模式用）
         try:
             return self.llm.chat(
                 messages,
                 tools=tools,
+                tool_choice=tool_choice if tools else None,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
+                trace=trace,
             )
         except requests.HTTPError as exc:
             unsupported = (
@@ -305,13 +363,47 @@ class Agent:
                 tools=None,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
+                trace=trace,
             )
 
-    def _run_tool(self, name: str, arguments: Dict[str, Any]) -> str:
-        """执行工具并返回结果文本；报错也返回给 LLM，让它自行调整。"""
+    def _resolve_tool(self, name: str) -> tuple[Optional[Tool], Optional[str]]:
+        """按名字或别名解析工具。返回 (工具, 命中的别名)；按名字命中时第二个值为 None。
+
+        别名即 sub agent 名（如 researcher/writer/reviewer）：模型经常直接写
+        writer({...}) 而不用规范形式 call_sub_agent({name: "writer", ...})，
+        此时解析到 call_sub_agent 并记录命中的别名。
+        """
         tool = self.tools.get(name)
+        if tool is not None:
+            return tool, None
+        for t in self.tools.values():
+            if name in t.aliases:
+                return t, name
+        return None, None
+
+    def _run_tool(self, name: str, arguments: Dict[str, Any]) -> str:
+        """执行工具并返回结果文本；报错也返回给 LLM，让它自行调整。
+
+        别名容错：模型用子代理名调用时（如 writer({"task": ...})），自动翻译为
+        call_sub_agent({"name": "writer", "task": ...})，不再报「未知工具」。
+        """
+        tool, alias_for = self._resolve_tool(name)
         if tool is None:
-            return f"ERROR: 未知工具 {name!r}，可用工具: {sorted(self.tools)}"
+            alias_names = sorted(a for t in self.tools.values() for a in t.aliases)
+            hint = (
+                f"；另外可以直接用子代理名 {alias_names} 调用（效果等同 call_sub_agent）"
+                if alias_names else ""
+            )
+            return f"ERROR: 未知工具 {name!r}，可用工具: {sorted(self.tools)}{hint}"
+        if alias_for is not None:
+            # 把别名补进缺省的 name 参数: writer({"task": ...}) -> call_sub_agent({"name": "writer", "task": ...})
+            if "name" in (tool.parameters.get("properties") or {}) and "name" not in arguments:
+                arguments = dict(arguments)
+                arguments["name"] = alias_for
+            self.trace.log(
+                self.name,
+                f"别名 {name!r} -> {tool.name}({json.dumps(arguments, ensure_ascii=False)})",
+            )
         try:
             result = tool.call(arguments)
             if not isinstance(result, str):

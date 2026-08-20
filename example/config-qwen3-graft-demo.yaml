@@ -1,0 +1,70 @@
+# ToyAgent 配置示例: --reuse-agent-kv-append 效果验证(复杂多级 agent 链)
+#
+# 与 example/config-qwen3.yaml 的区别: 任务是一个三级子代理流水线
+#   main -> researcher(调研) -> main -> writer(实现) -> main -> reviewer(审查) -> main
+# 每次 main 从子 agent 返回都会触发一次"子输出 KV 拼接", 且子输出
+# (调研结论 / 完整代码 / 审查意见)比单级示例长得多, 拼接收益更明显.
+#
+# 启动方式(服务端必须开 --reuse-agent-kv-append):
+#   python -m lminfer serve /path/to/Qwen3-8B --served-model-name Qwen3-8B \
+#       --max-model-len 20480 --reuse-agent-kv-append --port 8000
+#   python example/run_graft_demo.py --config example/config-qwen3-graft-demo.yaml \
+#       --no-enable-thinking
+#
+# 效果验证:
+#   1. 客户端: run_graft_demo.py 会打印每次请求的 trace / prompt tokens / 复用 token
+#      数 / 跳过 prefill 比例 —— main 返回的那几行复用比例应在 90%+;
+#   2. 服务端日志: 每次 main 返回时打印
+#      「拼接子 agent 输出 KV N tok(位置 a..b) + 复用 main 历史 KV M tok, 剩余 K tok prefill」
+#      —— N 即子 agent 输出正文的 KV 被直接插入 main 的 KV cache, 没有重复 prefill;
+#   3. 对比: 只开 --reuse-agent-kv(LCP 模式)时, 子输出正文无法复用(它不是任何
+#      已保存段的公共前缀), 同样的返回请求剩余 prefill 会多出约一个子输出的长度.
+
+# ---- LMInfer 服务连接 ----
+base_url: http://localhost:8000/v1
+model: Qwen3-8B                # 需与 --served-model-name 一致
+api_key: EMPTY
+
+# ---- 运行时参数 ----
+temperature: 0.3              # 低温度让工具调用更稳定
+max_tokens: 2048
+max_iters: 10                 # main 最多 10 轮(3 次工具调用 + 最终答案, 足够)
+sub_max_iters: 1              # 子 agent 一轮直接作答
+tool_mode: auto
+force_tool_call: true         # 首轮强制工具调用, 保证 main 先分派而不是直接作答
+quiet: false
+agent_mode: true              # LMInfer agent 模式: 服务端按会话统计并做跨请求 KV 复用
+
+# ---- 任务: 三级子代理流水线(researcher -> writer -> reviewer, 依次串行) ----
+task: |
+  请完成「Python 单词频统计工具」的完整设计与实现。必须严格按顺序完成以下 4 步,
+  任何一步都不能跳过, 每一步都必须先拿到上一步的结果再继续:
+  第 1 步:调用 call_sub_agent(name="researcher"),让它调研:用 Python 统计一段英文
+  文本中每个单词出现次数, 最高效的做法是什么(collections.Counter / 普通 dict / 其他),
+  以及处理大小写、标点符号时需要注意什么。
+  第 2 步:拿到 researcher 的结果后, 调用 call_sub_agent(name="writer"),把调研结论
+  概要连同任务「根据以上结论, 编写一个完整的 Python 函数
+  word_frequency(text: str) -> list[tuple[str, int]], 返回按频次降序排列的
+  (单词, 次数) 列表, 要求统一小写、去除标点, 包含必要的注释」一起交给 writer 实现。
+  第 3 步:拿到 writer 的结果后, 调用 call_sub_agent(name="reviewer"),把 writer
+  输出的完整代码原文(一字不改)连同任务「审查下面这份代码的正确性、健壮性与可改进点,
+  输出明确的审查意见」一起交给 reviewer 审查。
+  第 4 步:拿到 reviewer 的结果后, 综合三步结果输出最终答案, 格式必须为:
+  调研结论: ...(researcher 结论要点)
+  最终代码: ...(writer 的完整代码)
+  审查意见: ...(reviewer 意见要点)
+  注意: 禁止跳过任何一步, 禁止在拿到 reviewer 结果之前输出最终答案。
+
+# ---- sub agents: 名称 -> 系统提示词(覆盖内置默认, 要求更长的结构化输出) ----
+sub_agents:
+  researcher: |
+    你是 researcher sub agent, 负责给出准确、结构化的调研结论。
+    直接输出调研结论(3-6 条要点即可, 每条一句话), 不要调用任何工具, 不要寒暄。
+  writer: |
+    你是 writer sub agent, 负责根据任务要求编写完整、可直接运行的 Python 代码。
+    直接输出完整代码(含函数定义、docstring 与关键注释), 不要省略任何部分,
+    不要调用任何工具, 不要寒暄。
+  reviewer: |
+    你是 reviewer sub agent, 负责审查他人给出的代码: 从正确性、健壮性、可读性
+    三方面找出问题与改进点, 输出分点的审查意见(每条一行, 结论明确)。
+    不要调用任何工具, 不要寒暄。

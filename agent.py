@@ -185,7 +185,8 @@ class Agent:
             "需要调用工具时，在回复中输出一行（一次可输出多行）:\n"
             f"{example}\n"
             "arguments 必须包含该工具的全部必填参数。\n"
-            "工具执行结果会以「[工具结果] 工具名: ...」的形式作为下一条用户消息返回给你。\n"
+            "工具执行结果会以「[工具结果] 工具名: ...」的形式作为下一条用户消息返回给你；"
+            "那是工具的返回，不是你自己的回答，不要复述它。\n"
             "不需要调用工具时，直接输出最终回答即可。"
         )
 
@@ -290,7 +291,13 @@ class Agent:
                     )
                     result = self._run_tool(name, arguments)
                     self.trace.log(self.name, f"工具 {name} 返回: {result}")
-                    results.append(f"[工具结果] {name}: {result}")
+                    # 回填必须显式声明"这是工具返回、不是你的回答"——模型常把
+                    # 回填段原样抄进自己的最终输出（文本协议特有失真）
+                    results.append(
+                        f"[工具结果] {name} 返回: {result}"
+                        "（以上是工具的返回内容，不是你自己的回答，"
+                        "请基于它继续作答，不要再复述本段）"
+                    )
                 # 一次回复可能含多个调用；合并为一条 user 消息，保持 user/assistant 交替
                 messages.append({"role": "user", "content": "\n\n".join(results)})
                 continue

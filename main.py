@@ -1,8 +1,14 @@
-"""示例入口：1 个 main agent + 若干 sub agent，模型服务为 LMInfer（OpenAI 兼容接口）。
+"""示例入口：main agent + 若干 sub agent，模型服务为 OpenAI 兼容接口（LMInfer/vLLM）。
 
 用法：
     python main.py --config example/config-lminfer.yaml
     python main.py --base-url http://localhost:8000/v1 --model Qwen3-0.6B
+
+架构（主/子 agent 共用同一个 Agent 循环，区别只在工具集）：
+- main agent:   通用文件工具（read_file/write_file 等）+ call_sub_agent；
+                收到任务后自主决定：直接回答 / 用文件工具 / 调用子 agent。
+- sub agent:    只有通用文件工具（能自己读文件、写文件），不能继续向下分派子任务
+                （call_sub_agent 是 root_only 工具，构造时自动剥离，最多两级）。
 
 默认以 LMInfer 的 agent 模式请求（mode/trace/session_id，服务端按会话统计），
 用 --no-agent-mode 关闭后可兼容 vLLM 等普通 OpenAI 服务。
@@ -15,44 +21,53 @@ import argparse
 import os
 from typing import Any, Dict, Optional
 
-from agent import Agent, Tool, Trace
+from agent import Agent, Trace
 from llm import LLMClient
+from tools import Tool, build_file_tools
 
 MAIN_SYSTEM_PROMPT = (
-    "你是 main agent，负责接收用户任务、分析问题并规划执行步骤。\n"
-    "可用的 sub agent 只有三个: researcher（调研）、writer（实现/写作）、reviewer（审查）。\n"
+    "你是 main agent，负责接收用户任务、分析问题、规划并执行步骤，最后汇总输出。\n"
+    "你拥有两类能力:\n"
+    "1. 调用子 agent: call_sub_agent 工具可以把需要专项能力（调研/实现/审查等）的"
+    "子任务分派给 sub agent 执行；只有当任务确实需要专项处理时才调用它。\n"
+    "2. 使用文件工具: read_file / write_file / list_directory / search_files 可以直接"
+    "读写文件、查看目录结构，用于需要读取本地文件或产出文件的任务。\n"
     "执行规则:\n"
-    "1. 收到任务后，第一步必须先调用 call_sub_agent 工具把任务分派给合适的 sub agent，"
-    "禁止跳过工具直接回答；在拿到工具结果之前不得输出最终回答。\n"
-    "2. call_sub_agent 的参数 name 必须精确取 researcher/writer/reviewer 之一，"
-    "task 写清楚交给该 sub agent 的具体问题。"
-    "（也可以直接用子代理名作为工具名调用，如 writer({\"task\": ...})，效果相同。）\n"
-    "3. 可以按需多次、串行调用不同的 sub agent，每一步都基于已获得的结果继续推进。\n"
-    "4. 所有子任务完成后，综合所有 sub agent 的输出，给出最终答案；给出最终回答时不要调用任何工具。\n"
+    "1. 收到任务后先分析: 简单问题可直接回答；需要看文件就用文件工具；需要专项能力"
+    "（如调研、写代码、审查）就调用 call_sub_agent 分派给合适的 sub agent——"
+    "是否调用、调用哪个、调用几次，都由你根据任务自主决定，不要为了调用而调用。\n"
+    "2. call_sub_agent 的参数 name 必须是已列出的 sub agent 名之一，task 写清楚交给"
+    "该 sub agent 的具体问题（也可以直接用子代理名作为工具名调用，如 writer({\"task\": ...})）。\n"
+    "3. 可以按需多次、串行调用不同的 sub agent 和文件工具，每一步都基于已获得的结果继续推进。\n"
+    "4. 所有子任务完成后，综合所有结果给出最终答案；给出最终回答时不要再调用任何工具。\n"
 )
 
 SUB_SYSTEM_PROMPTS: Dict[str, str] = {
     "researcher": (
         "你是 researcher sub agent，负责快速给出准确的事实、定义与实现思路调研结果。"
-        "直接输出调研结论（要点即可），不要调用任何工具，不要寒暄。"
+        "你可以使用文件工具（read_file/list_directory/search_files 等）查看本地文件来辅助"
+        "调研，需要时再调用；直接输出调研结论（要点即可），不要寒暄。"
     ),
     "writer": (
         "你是 writer sub agent，负责根据任务要求完成具体产出（如编写代码、撰写文本）。"
-        "直接输出完整产出，不要调用任何工具。"
+        "你可以使用文件工具：需要参考本地文件时用 read_file，需要产出文件时用 write_file。"
+        "直接输出完整产出，不要寒暄。"
     ),
     "reviewer": (
         "你是 reviewer sub agent，负责审查他人给出的实现或结论：找出错误、遗漏与可改进点，"
-        "输出明确的审查意见。不要调用任何工具。"
+        "输出明确的审查意见。需要查看被审查的文件时可以使用 read_file 等文件工具。"
     ),
 }
 
-# 示例任务（纯推理分派）：模型必须调用 call_sub_agent 让 researcher 完成推理，
-# 再复述其结果——不涉及代码执行，重点演示 tool call 链路本身。
+# 示例任务（文件操作 + 子代理分派）：同时演示「主 agent 用 read_file 读文件」与
+# 「主 agent 自主决定调用子 agent」，不涉及代码执行。
 DEFAULT_TASK = (
-    "请先调用 call_sub_agent 工具，把下面这个问题交给 researcher 子代理调研：\n"
-    "「快速排序的平均时间复杂度是多少？用一两句话说明原因。」\n"
-    "拿到 researcher 的结果后，先输出一行「researcher 调研结果：」，"
-    "再原样复述它的答案，除此之外不要输出任何其他内容。"
+    "请完成下面这个「调研 + 文件操作」任务:\n"
+    "1. 用 read_file 读取本仓库的 requirements.txt，了解项目依赖；\n"
+    "2. 把「如何用最少的第三方依赖实现一个 OpenAI 兼容的 LLM 客户端？」交给 researcher 子代理调研；\n"
+    "3. 综合两者结果输出：第一行「依赖清单：」+ requirements.txt 中的依赖；"
+    "第二行「调研结论：」+ researcher 结论的要点。\n"
+    "请自主决定调用哪些工具、以什么顺序完成；第 1、2 步不要跳过。"
 )
 
 
@@ -86,19 +101,32 @@ def build_sub_agents(
     llm: LLMClient,
     trace: Trace,
     temperature: float = 0.7,
-    max_iters: int = 1,
+    max_iters: int = 4,
+    tool_mode: str = "auto",
+    max_tokens: int = 2048,
     prompts: Optional[Dict[str, str]] = None,
+    tools: Optional[list] = None,
 ) -> Dict[str, Agent]:
-    """按提示词字典构建 sub agent（默认用内置的 SUB_SYSTEM_PROMPTS）。"""
+    """按提示词字典构建 sub agent。
+
+    sub agent 拥有通用文件工具（read_file/write_file 等），可以自己查文件、写文件；
+    但 call_sub_agent 是 root_only 工具，Agent 构造时会被自动剥离——sub agent 不能
+    再向下分派子任务（最多两级），避免无限递归。
+    """
     prompts = prompts or SUB_SYSTEM_PROMPTS
+    tools = tools if tools is not None else build_file_tools()
     return {
         name: Agent(
             name=name,
             system_prompt=prompt,
             llm=llm,
+            tools=list(tools),
             trace=trace,
             max_iters=max_iters,
             temperature=temperature,
+            max_tokens=max_tokens,
+            tool_mode=tool_mode,
+            is_root=False,  # sub agent: 剥离 call_sub_agent，禁止再向下分派（最多两级）
         )
         for name, prompt in prompts.items()
     }
@@ -138,6 +166,7 @@ def make_call_sub_agent(sub_agents: Dict[str, Agent]) -> Tool:
         },
         func=call_sub_agent,
         aliases=names,  # 子代理名可直接当工具名调用（模型常见行为），自动翻译
+        root_only=True,  # 只允许 main agent 调用；sub agent 构造时会被自动剥离（最多两级）
     )
 
 
@@ -149,24 +178,30 @@ def build_main_agent(
     max_iters: int = 10,
     tool_mode: str = "auto",
     system_prompt: Optional[str] = None,
-    force_tool_call: bool = True,
+    force_tool_call: bool = False,
+    max_tokens: int = 2048,
+    tools: Optional[list] = None,
 ) -> Agent:
+    """main agent: 通用文件工具 + call_sub_agent（root_only）。"""
+    tools = tools if tools is not None else build_file_tools()
     return Agent(
         name="main",
         system_prompt=system_prompt or MAIN_SYSTEM_PROMPT,
         llm=llm,
-        tools=[make_call_sub_agent(sub_agents)],
+        tools=[*tools, make_call_sub_agent(sub_agents)],
         max_iters=max_iters,
         temperature=temperature,
+        max_tokens=max_tokens,
         trace=trace,
         tool_mode=tool_mode,
         force_tool_call=force_tool_call,
+        is_root=True,  # main agent: 唯一允许调用 call_sub_agent 的 root
     )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="main agent + sub agent，模型服务为 LMInfer（OpenAI 兼容接口）"
+        description="main agent + sub agent，模型服务为 OpenAI 兼容接口（LMInfer/vLLM）"
     )
     parser.add_argument("--config", default=None, help="YAML 配置文件路径（见 example/ 目录）")
     parser.add_argument(
@@ -179,8 +214,12 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=None, help="采样温度")
     parser.add_argument("--max-iters", type=int, default=None, help="main agent 最大循环轮数（防止死循环）")
     parser.add_argument(
+        "--max-tokens", type=int, default=None,
+        help="单次模型请求的最大生成 token 数（默认 2048；Qwen3 带 think 时需留足空间）",
+    )
+    parser.add_argument(
         "--sub-max-iters", type=int, default=None,
-        help="sub agent 最大循环轮数（默认 1：直接作答）",
+        help="sub agent 最大循环轮数（默认 4：留出「调用文件工具后再作答」的轮数）",
     )
     parser.add_argument(
         "--tool-mode",
@@ -191,9 +230,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--force-tool-call", action=argparse.BooleanOptionalAction, default=None,
-        help="第一轮强制工具调用(默认开): 首轮 tool_choice=\"required\"(原生模式) / "
-             "首条回复必须输出 TOOL_CALL(文本模式), 保证 main 先分派子任务而不是直接作答; "
-             "--no-force-tool-call 关闭",
+        help="第一轮强制工具调用（默认关，主 agent 自主决定是否调用工具）: 开启后首轮 "
+             "tool_choice=\"required\"(原生模式) / 首条回复必须输出 TOOL_CALL(文本模式), "
+             "保证 main 先分派子任务而不是直接作答; --no-force-tool-call 关闭",
     )
     parser.add_argument(
         "--agent-mode", action=argparse.BooleanOptionalAction, default=None,
@@ -219,9 +258,10 @@ def main() -> None:
     task = resolve(args, cfg, "task", DEFAULT_TASK)
     temperature = resolve(args, cfg, "temperature", 0.7)
     max_iters = resolve(args, cfg, "max_iters", 10)
-    sub_max_iters = resolve(args, cfg, "sub_max_iters", 1)
+    max_tokens = resolve(args, cfg, "max_tokens", 2048)
+    sub_max_iters = resolve(args, cfg, "sub_max_iters", 4)
     tool_mode = resolve(args, cfg, "tool_mode", "auto")
-    force_tool_call = resolve(args, cfg, "force_tool_call", True)
+    force_tool_call = resolve(args, cfg, "force_tool_call", False)
     agent_mode = resolve(args, cfg, "agent_mode", True)
     enable_thinking = resolve(args, cfg, "enable_thinking", None)
     quiet = args.quiet or bool(cfg.get("quiet", False))
@@ -238,10 +278,14 @@ def main() -> None:
         agent_mode=agent_mode, enable_thinking=enable_thinking,
     )
     trace = Trace(verbose=not quiet)
-    sub_agents = build_sub_agents(llm, trace, temperature, sub_max_iters, prompts=sub_prompts)
+    sub_agents = build_sub_agents(
+        llm, trace, temperature, sub_max_iters, tool_mode,
+        max_tokens=max_tokens, prompts=sub_prompts,
+    )
     main_agent = build_main_agent(
         llm, sub_agents, trace, temperature, max_iters, tool_mode,
         system_prompt=main_prompt, force_tool_call=force_tool_call,
+        max_tokens=max_tokens,
     )
 
     src = f" (配置文件: {args.config})" if args.config else ""
@@ -251,10 +295,6 @@ def main() -> None:
 
     print("\n========== 最终答案 ==========")
     print(answer)
-    trace.dump()
-    if agent_mode and llm.session_id:
-        print(f"\nLMInfer agent 会话: {llm.session_id}"
-              "（服务端 GET /v1/agent/sessions 可查该会话的请求数与 token 消耗）")
 
 
 if __name__ == "__main__":

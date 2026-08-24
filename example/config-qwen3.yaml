@@ -18,27 +18,31 @@ api_key: EMPTY
 temperature: 0.3              # 低温度让工具调用更稳定（0.7 容易让模型跳过工具直接作答）
 max_tokens: 2048
 max_iters: 10
-sub_max_iters: 1
+sub_max_iters: 4              # sub agent 最大轮数（留出「调用文件工具后再作答」的空间）
 tool_mode: auto
-force_tool_call: true        # 第一轮强制工具调用: 原生模式 tool_choice="required" / 文本模式首条必须 TOOL_CALL
+force_tool_call: false        # 默认关：主 agent 自主决定是否调用子代理/工具
 quiet: false
 agent_mode: true               # LMInfer agent 模式: 服务端按会话统计主/子 agent 的请求与 token
 
-# ---- 任务（纯推理分派示例: 模型必须先调用 call_sub_agent 让 researcher 完成推理, 无代码执行）----
+# ---- 任务（文件操作 + 子代理分派）----
 task: |
-  请先调用 call_sub_agent 工具，把下面这个问题交给 researcher 子代理调研：
-  「快速排序的平均时间复杂度是多少？用一两句话说明原因。」
-  拿到 researcher 的结果后，先输出一行「researcher 调研结果：」，再原样复述它的答案，
-  除此之外不要输出任何其他内容。
+  请完成下面这个「调研 + 文件操作」任务:
+  1. 用 read_file 读取本仓库的 requirements.txt，了解项目依赖；
+  2. 把「如何用最少的第三方依赖实现一个 OpenAI 兼容的 LLM 客户端？」交给 researcher 子代理调研；
+  3. 综合两者结果输出：第一行「依赖清单：」+ requirements.txt 中的依赖；
+     第二行「调研结论：」+ researcher 结论的要点。
+  请自主决定调用哪些工具、以什么顺序完成；第 1、2 步不要跳过。
 
-# ---- sub agents: 名称 -> 系统提示词（可自由增删改）----
+# ---- sub agents: 名称 -> 系统提示词（可自由增删改；都带文件工具）----
 sub_agents:
   researcher: |
     你是 researcher sub agent，负责快速给出准确的事实、定义与实现思路调研结果。
-    直接输出调研结论（要点即可），不要调用任何工具，不要寒暄。
+    你可以使用文件工具（read_file/list_directory/search_files 等）查看本地文件来辅助调研，
+    需要时再调用；直接输出调研结论（要点即可），不要寒暄。
   writer: |
     你是 writer sub agent，负责根据任务要求完成具体产出（如编写代码、撰写文本）。
-    直接输出完整产出，不要调用任何工具。
+    你可以使用文件工具：需要参考本地文件时用 read_file，需要产出文件时用 write_file。
+    直接输出完整产出，不要寒暄。
   reviewer: |
     你是 reviewer sub agent，负责审查他人给出的实现或结论：找出错误、遗漏与可改进点，
-    输出明确的审查意见。不要调用任何工具。
+    输出明确的审查意见。需要查看被审查的文件时可以使用 read_file 等文件工具。

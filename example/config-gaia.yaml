@@ -1,0 +1,32 @@
+# ToyAgent GAIA 测试配置（配合 gaia_test.py）
+#
+# 服务端（vLLM，Qwen3-8B，原生 tool calling）:
+#   python -m vllm.entrypoints.openai.api_server \
+#       --model /home/tanger/workspace/models/Qwen3-8B \
+#       --served-model-name Qwen3-8B --max-model-len 20480 --port 8000 \
+#       --enable-auto-tool-choice --tool-call-parser hermes
+# 跑第一条 GAIA 任务:
+#   cd /home/tanger/workspace/ToyAgent
+#   python3 gaia_test.py --config example/config-gaia.yaml
+# 跑全量 23 条:
+#   python3 gaia_test.py --config example/config-gaia.yaml \
+#       --data data/gaia_document_only.jsonl --out gaia_results/toyagent_gaia_all.jsonl
+
+base_url: http://localhost:8000/v1
+model: Qwen3-8B
+api_key: EMPTY
+
+# ---- 运行时参数 ----
+temperature: 0.3              # 低温度让工具调用更稳定
+max_tokens: 4096              # main/sub agent 单次生成上限（Qwen3 带 think 时需留足空间）;
+                              # 注意必须小于服务端 max_model_len(20480), 否则请求被 400 拒绝
+max_iters: 10                 # main agent 最大循环轮数
+sub_max_iters: 3              # sub agent 最大轮数（researcher: 1 轮 read_file + 1 轮作答）
+tool_mode: auto               # 原生 tool_choice 400 时自动降级文本协议
+force_tool_call: false        # 默认关: 主 agent 自主决定是否调用子代理/工具
+agent_mode: false             # 后端是 vLLM 时必须 false（LMInfer 才开 true）
+enable_thinking: true         # 开 thinking 逐行比对文档更稳（关 thinking 实测会抓错标题）
+quiet: false
+
+# ---- 数据（默认 data/task_1.jsonl；全量用 data/gaia_document_only.jsonl）----
+# data: data/gaia_document_only.jsonl

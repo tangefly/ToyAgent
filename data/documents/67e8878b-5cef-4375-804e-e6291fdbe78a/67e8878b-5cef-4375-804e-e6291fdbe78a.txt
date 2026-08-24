@@ -1,0 +1,31 @@
+--- page 1 ---
+Name Rating (out of 5)Vacancy Pool Sample Review
+Hotels
+Neptune's Palace 5 Yes Yes A hotel fit for a king.
+Admiral Sturgeon 5 No Yes The breakfast was wonderful. The price was not.
+Currents 4 Yes Yes The staff was helpful and accomodating.
+The Laughing Gull 3 No Yes Great proximity to the beach.
+Loach Towers 2 Yes No Good view of the water.
+Motels
+Sea Escape Inn 5 Yes Yes Don't let the "motel" look scare you. This place made for a clean and comfortable vacation.
+Wash Inn 3 No Yes It was nice that they had laundry machines for guests.
+Boulevard Motel 2 Yes No Real close to the gas station.
+Good Motel 1 Yes No Name is false advertising.
+Sea Larva Motel 0 Yes Yes Name is true advertising.
+Rental Houses
+Cape Super 4 No No The owner was very nice. A pleasure to talk to.
+Bleek Island 3 No No We got a personalized box of chocolates upon our arrival. How sweet!
+Pinedrift Avenue 4 Yes No This would be a good place if it wasn't an hour away from everything.
+Ocean and Main 5 No Yes The location is great, if you don't mind the noise.
+4th Street Cottage 5 No No The board games in the living room were nice to have.
+Shelley's Place 4 Yes Yes The floorboards creaked too loud! Made it hard to walk and sleep at the same time.
+Creakwood Creek 3 No Yes Tried fishing in the creek but nothing was biting.
+Headrush Beach 3 No No The accomodations are rough, but the private beach is amazing.
+Shiplap Cabin 3 Yes No Pretty sure this place is haunted.
+Haddonfield House 1 Yes No The kitchen made it easy to prepare our own meals during our stay.
+Campgrounds
+The Glampground 4 Yes Yes Has the most Ultra HD TVs out of any campground I've been to.
+Gull Crest 5 Yes Yes A bird defecated on our tent... never going back.
+Barnacle Isle 3 No No Hard to bring our RV here when the only access to the island is by boat.
+Cozy Wood 4 Yes Yes Not the most secluded, but clean and comfortable.
+Gravel Lot Campground 1 Yes No No water or electric hookups for our camper... talk about "roughing it".

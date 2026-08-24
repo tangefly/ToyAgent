@@ -1,0 +1,28 @@
+=== Sheet: Sheet1 ===
+Flop Video Rental Store	1001 Rewind Drive, Seattle WA
+Title	Genre	Year	Platform	Status
+DVD				
+Time-Parking 2: Parallel Universe	Science Fiction	2009.0		Available
+Breathtaking: The Keanu Reeves Story	Biopic	2023.0		Rented
+The Widest Goalpost	Sports	2021.0		Overdue
+Cereal Killer IV: No Milk	Horror	2012.0		Missing
+Shiny Vampire Car Chase	Action	2013.0		Missing
+People Hanging Out Together	Comedy	2020.0		Missing
+Blu-Ray
+Time-Parking 2: Parallel Universe	Science Fiction	2009.0		Missing
+Cereal Killer III: Incomplete Breakfast	Horror	2011.0		Rented
+Windshield Bug: The First Ten Seasons	Comedy	2016.0		Rented
+A Protist's Life	Documentary	2018.0		Available
+My Neighbor Is A Shrimp Farmer	Anime	2022.0		Available
+Dogs and Croatia: A Movie About Both These Things	Adventure	2023.0		Overdue
+Video Games
+First-Person Scooter	Racing	2019.0	Nintendo Switch	Missing
+The Locked Door	RPG	2021.0	Playstation 5	Available
+Shopping Cart Raceway	Racing	2005.0	Nintendo Gamecube	Rented
+No Lights	Horror	2004.0	Xbox	Overdue
+Eraser Simulator	Simulation	2018.0	Nintendo Switch	Available
+Gilbert Gopher Goes to Greece	Platformer	1995.0	Super Nintendo	Rented
+Skirmish	Fighting	2008.0	Xbox 360	Available
+Cool: The Game	Platformer	1994.0	Sega Genesis	Overdue
+Dinosaur Accountant	Simulation	1989.0	Nintendo Entertainment System	Available
+Four Controllers	Party	2009.0	Nintendo Wii	Overdue

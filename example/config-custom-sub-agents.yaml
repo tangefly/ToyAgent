@@ -14,8 +14,9 @@ model: Mistral-7B-Instruct
 temperature: 0.3            # 翻译类任务用低温度更稳定
 max_tokens: 2048
 max_iters: 10
-sub_max_iters: 1
+sub_max_iters: 4            # sub agent 最大轮数（留出「调用文件工具后再作答」的空间）
 tool_mode: auto
+force_tool_call: false      # 默认关：主 agent 自主决定是否调用子代理/工具
 quiet: false
 
 # ---- 任务 ----
@@ -27,10 +28,10 @@ task: |
 sub_agents:
   translator: |
     你是 translator sub agent，负责将英文翻译成准确、通顺的中文。
-    直接输出译文，不要调用任何工具，不要解释翻译过程。
+    直接输出译文，不要解释翻译过程。
   proofreader: |
     你是 proofreader sub agent，负责校对译文：检查意思是否忠实原文、有无漏译错译、
-    中文是否通顺，输出校对意见和改进后的译文。不要调用任何工具。
+    中文是否通顺，输出校对意见和改进后的译文。
 
 # ---- main agent 系统提示词（覆盖内置默认，聚焦翻译场景）----
 main_system_prompt: |

@@ -111,6 +111,8 @@ def main() -> None:
     api_key = resolve(args, cfg, "api_key", "EMPTY")
     temperature = resolve(args, cfg, "temperature", 0.3)
     task = args.task or cfg.get("task") or DEMO_TASK
+    # KV 复用测量需要链路完整, 默认强制首轮分派(小模型也可能跳过工具直接作答)
+    force_tool_call = resolve(args, cfg, "force_tool_call", True)
 
     llm = RecordingLLMClient(
         base_url=base_url, api_key=api_key, model=model,
@@ -119,8 +121,11 @@ def main() -> None:
     trace = Trace(verbose=True)
     sub_prompts = (cfg.get("sub_agents")
                    if isinstance(cfg.get("sub_agents"), dict) else SUB_SYSTEM_PROMPTS)
-    sub_agents = build_sub_agents(llm, trace, temperature, max_iters=1, prompts=sub_prompts)
-    main_agent = build_main_agent(llm, sub_agents, trace, temperature, max_iters=10)
+    # sub agent 也带文件工具(read_file 等), 但本演示任务不需要, 一轮直接作答
+    sub_agents = build_sub_agents(llm, trace, temperature, max_iters=4, prompts=sub_prompts)
+    main_agent = build_main_agent(
+        llm, sub_agents, trace, temperature, max_iters=10, force_tool_call=force_tool_call
+    )
 
     print(f"模型: {model} @ {base_url}，任务: 三级子代理流水线 "
           f"(researcher -> writer -> reviewer)\n")

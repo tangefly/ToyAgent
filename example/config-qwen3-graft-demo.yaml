@@ -29,9 +29,9 @@ api_key: EMPTY
 temperature: 0.3              # 低温度让工具调用更稳定
 max_tokens: 2048
 max_iters: 10                 # main 最多 10 轮(3 次工具调用 + 最终答案, 足够)
-sub_max_iters: 1              # 子 agent 一轮直接作答
+sub_max_iters: 4              # 子 agent 最大轮数(默认直接作答, 留有调用文件工具的空间)
 tool_mode: auto
-force_tool_call: true         # 首轮强制工具调用, 保证 main 先分派而不是直接作答
+force_tool_call: true         # KV 复用测量场景强制首轮分派, 保证链路完整、可对比
 quiet: false
 agent_mode: true              # LMInfer agent 模式: 服务端按会话统计并做跨请求 KV 复用
 

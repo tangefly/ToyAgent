@@ -1,0 +1,31 @@
+=== Sheet: Sheet1 ===
+Zone 1
+Name	Type	Revenue	Rent	Opened
+Rainforest Bistro	Restaurant	32771.0	1920.0	2023-07-19 00:00:00
+Panorama Outfitters	Apparel	23170.0	1788.0	2023-06-11 00:00:00
+Zack's Cameras and Trail Mix	Electronics / Food	33117.0	1001.0	2023-05-12 00:00:00
+SignPro Custom DeSign	Signage	21246.0	1121.0	2023-01-30 00:00:00
+Zone 2
+Serenity Indoor Fountains	Decor	25234.0	6359.0	2023-05-01 00:00:00
+Budapest Comics	Comics	12251.0	2461.0	2023-01-03 00:00:00
+Dottie's Lattes	Restaurant	34427.0	1293.0	2023-05-31 00:00:00
+Zone 3
+Gumball Utopia	Candy	13271.0	3420.0	2023-11-04 00:00:00
+Your Uncle's Basement	Sports Collectibles	11119.0	8201.0	2023-01-10 00:00:00
+Carnivore Loan Specialists	Finance	31000.0	50312.0	2023-03-09 00:00:00
+Harry's Steakhouse	Restaurant	46791.0	1327.0	2023-01-08 00:00:00
+Two Guys Paper Supplies	Office Supplies	76201.0	1120.0	2023-09-20 00:00:00
+Dragon Pizza	Restaurant	10201.0	2000.0	2023-01-20 00:00:00
+Zone 4
+Us Three: The U2 Fan Store	Music	10201.0	1200.0	2023-09-20 00:00:00
+Jimmy's Buffett	Restaurant	10027.0	3201.0	2023-01-20 00:00:00
+Franz Equipment Rentals	Industrial Supplies	20201.0	2201.0	2023-03-06 00:00:00
+Nigel's Board Games	Board Games	62012.0	2013.0	2023-01-07 00:00:00
+Destructor's Den	Baby Supplies	79915.0	5203.0	2023-02-06 00:00:00
+Hook Me Up	Sporting Goods	56503.0	1940.0	2023-05-07 00:00:00
+Zone 5 (Food Court)
+Slam Dunk	Restaurant	61239.0	5820.0	2023-10-20 00:00:00
+Ben's Hungarian-Asian Fusion	Restaurant	68303.0	2011.0	2023-02-12 00:00:00
+PleaseBurgers	Restaurant	20132.0	1402.0	2023-02-15 00:00:00
+Reagan's Vegan	Restaurant	20201.0	6201.0	2023-07-20 00:00:00
+FreshCart Store-to-Table	Restaurant	83533.0	2751.0	2023-12-08 00:00:00

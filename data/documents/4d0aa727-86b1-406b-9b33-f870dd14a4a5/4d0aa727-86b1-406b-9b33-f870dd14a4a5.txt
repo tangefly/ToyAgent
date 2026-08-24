@@ -1,0 +1,22 @@
+=== Sheet: Sheet1 ===
+Number	Type/Wheel Configuration	Operating Status	Excursion/Location	
+Steam
+1060	0-4-0	Operational	Sunset Picnic Trip
+31	0-4-0	Static Display	Main Lawn
+18	4-4-0	Static Display	Display Hall
+825	2-6-0	Operational	Fall Foliage Tour
+52	2-8-0	Undergoing Repairs	Repair Shed
+89	2-6-4	Undergoing Repairs	Sent to Pikesville
+266	2-8-4	Operational	Murder Mystery Express
+Diesel			
+93	NW2	Operational	Sunset Picnic Trip
+210	F3	Operational	Fall Foliage Tour
+530	PA	Static Display	Display Hall
+59	GP15	Undergoing Repairs	Repair Shed
+57	GP30	Operational	Sunset Picnic Trip
+Traction/Other			
+741	RDC	Operational	Fall Foliage Tour
+700	RDC	Static Display	Display Hall
+2	Brill	Operational	Main Street Jaunt
+4	PCC	Undergoing Repairs	Repair Shed
+8	Handcar	Static Display	Main Lawn
